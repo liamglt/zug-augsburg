@@ -17,3 +17,11 @@ Open the page in **Safari** → Share button → **Add to Home Screen**.
 ## Hosting
 
 GitHub Pages: Settings → Pages → Source "Deploy from a branch" → `main` / `(root)`.
+
+## Relay (needed for live data)
+
+The MVV server doesn't let websites load its data directly (CORS), so the app goes through a small Cloudflare Worker: `relay/worker.js`. It only forwards departure requests for München Hbf and Augsburg Bahnhof Haunstetterstraße, and only for this site.
+
+1. Cloudflare dashboard → **Workers & Pages** → **Create** → **Create Worker** → name it e.g. `zug-relay` → **Deploy**.
+2. **Edit code** → replace everything with `relay/worker.js` → **Deploy**.
+3. Put the worker's address (e.g. `https://zug-relay.<name>.workers.dev`) into `const RELAY = "..."` in `index.html`.
