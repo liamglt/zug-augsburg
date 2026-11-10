@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zug Augsburg</title>
+<meta name="description" content="Live-Abfahrten München Hbf ↔ Augsburg (RE9, RB86, RB87) für Hin- und Rückfahrt">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Zug Augsburg">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #111827; --muted: #6b7280; --line: #e5e7eb;
+    --ok: #15803d; --ok-bg: #dcfce7; --warn: #b45309; --warn-bg: #fef3c7; --bad: #b91c1c; --bad-bg: #fee2e2;
+    --accent: #1d4ed8; --accent-bg: #dbeafe; --chip: #ef4444;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1120; --card: #131c2e; --text: #e5e7eb; --muted: #94a3b8; --line: #1f2a40;
+      --ok: #4ade80; --ok-bg: #12301f; --warn: #fbbf24; --warn-bg: #3a2c0b; --bad: #f87171; --bad-bg: #3b1414;
+      --accent: #93c5fd; --accent-bg: #172554;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 560px; margin: 0 auto;
+    padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 24px); }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  button { font: inherit; border: 0; border-radius: 12px; padding: 10px 14px; cursor: pointer;
+    background: var(--card); color: var(--text); box-shadow: 0 0 0 1px var(--line) inset; }
+  button:active { transform: scale(0.97); }
+  .icon-btn { width: 44px; height: 44px; padding: 0; display: grid; place-items: center; font-size: 20px; }
+  .card { background: var(--card); border-radius: 16px; padding: 14px 16px; box-shadow: 0 0 0 1px var(--line) inset; margin-bottom: 12px; }
+  .hero { padding: 16px; }
+  .hero.ok { background: var(--ok-bg); box-shadow: none; }
+  .hero.warn { background: var(--warn-bg); box-shadow: none; }
+  .hero.bad { background: var(--bad-bg); box-shadow: none; }
+  .hero.none { background: var(--accent-bg); box-shadow: none; }
+  .hero .k { font-size: 13px; color: var(--muted); }
+  .hero .big { font-size: 26px; font-weight: 700; margin: 4px 0 2px; letter-spacing: -0.01em; }
+  .hero .state { font-weight: 600; }
+  .ok .state { color: var(--ok); } .warn .state { color: var(--warn); } .bad .state { color: var(--bad); }
+  .list { padding: 4px 0; }
+  .row { display: grid; grid-template-columns: 58px 1fr auto; gap: 10px; align-items: center;
+    padding: 12px 16px; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; }
+  .row.mine { background: var(--accent-bg); }
+  .row.gone { opacity: 0.45; }
+  .time { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 18px; }
+  .time s { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+  .chip { display: inline-block; background: var(--chip); color: #fff; font-weight: 700; font-size: 12px;
+    border-radius: 6px; padding: 2px 6px; margin-right: 6px; }
+  .dest { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .badge { font-size: 13px; font-weight: 700; border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+  .b-ok { color: var(--ok); background: var(--ok-bg); }
+  .b-warn { color: var(--warn); background: var(--warn-bg); }
+  .b-bad { color: var(--bad); background: var(--bad-bg); }
+  .empty, .err { padding: 18px 16px; color: var(--muted); }
+  .err { color: var(--bad); }
+  .foot { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
+  dialog { border: 0; border-radius: 18px; padding: 0; width: min(96vw, 420px); background: var(--card); color: var(--text); }
+  dialog::backdrop { background: rgba(0,0,0,0.45); }
+  .dlg { padding: 16px; }
+  .dlg h2 { margin: 0 0 4px; font-size: 18px; }
+  .dlg p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px;
+    background: var(--card); box-shadow: 0 0 0 1px var(--line) inset; margin-bottom: 12px; }
+  .tabs button { box-shadow: none; background: transparent; border-radius: 10px; padding: 9px 0; font-weight: 600; color: var(--muted); }
+  .tabs button[aria-selected="true"] { background: var(--accent); color: #fff; }
+  @media (prefers-color-scheme: dark) { .tabs button[aria-selected="true"] { color: #0b1120; } }
+  .day { display: grid; grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 6px; margin: 8px 0; font-size: 15px; }
+  .day span:first-child { overflow: hidden; text-overflow: ellipsis; }
+  .day.head { margin: 0; color: var(--muted); font-size: 12px; }
+  .day input { font: inherit; font-size: 15px; padding: 8px 6px; border-radius: 10px; border: 1px solid var(--line); min-width: 0;
+    background: var(--bg); color: var(--text); width: 100%; }
+  .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+  .primary { background: var(--accent); color: #fff; box-shadow: none; }
+  @media (prefers-color-scheme: dark) { .primary { color: #0b1120; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 id="title">München Hbf → Augsburg</h1>
+      <div class="sub" id="updated">Lädt …</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="icon-btn" id="refresh" aria-label="Aktualisieren">↻</button>
+      <button class="icon-btn" id="settings" aria-label="Vorlesungszeiten">⚙︎</button>
+    </div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" data-dir="out" aria-selected="true">Hinfahrt</button>
+    <button role="tab" data-dir="home" aria-selected="false">Rückfahrt</button>
+  </div>
+
+  <div class="card hero none" id="hero">
+    <div class="k" id="hero-k">Heute</div>
+    <div class="big" id="hero-big">–</div>
+    <div class="state" id="hero-state"></div>
+  </div>
+
+  <div class="card list" id="list"><div class="empty">Lädt Abfahrten …</div></div>
+  <div class="foot" id="source"></div>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog" class="dlg" id="form">
+    <h2>Vorlesungszeiten</h2>
+    <p>Beginn der ersten und Ende der letzten Vorlesung. Leer lassen, wenn du an dem Tag nicht nach Augsburg fährst. Wird nur auf diesem Handy gespeichert.</p>
+    <div id="days"></div>
+    <div class="actions">
+      <button value="cancel" formnovalidate>Abbrechen</button>
+      <button value="save" class="primary">Speichern</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const LINES = ["RE9", "RE86", "RE87", "RB86", "RB87"];   // 86/87 run as RB or RE depending on the train
+const DELAY_WARN = 5;
+const OUT_WINDOW = [80, 40];       // way there: "your train" leaves 80-40 min before the first lecture
+const HOME_BUFFER = 20;            // way home: earliest train 20 min after the last lecture ends ...
+const HOME_WINDOW = 40;            // ... and the normal choice is within the 40 min after that
+const DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
+const SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
+const KEY = "train-board-lectures";
+const DIRS = {
+  // way there: only her lines; München Hbf is a terminus, so every one of them leaves towards Augsburg
+  out:  { title: "München Hbf → Augsburg", mvgId: "de:09162:6", db: "8000261", onlyLines: true, towards: null },
+  // way home: any regional train from Haunstetter Straße heading to München (lines stopping there may differ)
+  home: { title: "Haunstetter Str. → München", query: "Haunstetter", placeMatch: /augsburg/i,
+          dbQuery: "Augsburg Haunstetterstraße", onlyLines: false, towards: /münchen/i },
+};
+const $ = (id) => document.getElementById(id);
+const norm = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+const hm = (d) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+const at = (base, hhmm) => { const [h, m] = hhmm.split(":").map(Number); const d = new Date(base); d.setHours(h, m, 0, 0); return d; };
+const real = (d) => d.planned.getTime() + d.delay * 60000;
+const isBad = (d) => d.cancelled || d.delay >= DELAY_WARN;
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+// lectures: { dayIndex(0=Mon): { start: "HH:MM", end: "HH:MM" } }  (older versions stored just "HH:MM")
+function loadLectures() {
+  let v = {};
+  try { v = JSON.parse(localStorage.getItem(KEY)) || {}; } catch {}
+  for (const k in v) if (typeof v[k] === "string") v[k] = { start: v[k] };
+  return v;
+}
+function saveLectures(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} }
+const today = () => loadLectures()[new Date().getDay() - 1] || null;   // getDay: 0=Sun, 1=Mon
+
+// ---- data: MVG first, DB (transport.rest) as fallback ----
+const mvgIds = {};
+async function fromMVG(dir) {
+  const cfg = DIRS[dir];
+  let id = cfg.mvgId || mvgIds[dir];
+  if (!id) {
+    const r = await fetch("https://www.mvg.de/api/bgw-pt/v3/locations?locationTypes=STATION&query=" + encodeURIComponent(cfg.query));
+    if (!r.ok) throw new Error("MVG " + r.status);
+    const locs = (await r.json()).filter((l) => l.globalId && cfg.placeMatch.test((l.name || "") + " " + (l.place || "")));
+    const hit = locs.find((l) => /bahnhof/i.test(l.name || "")) || locs[0];   // the train station, not a tram/bus stop
+    if (!hit) throw new Error("MVG: Station nicht gefunden");
+    id = mvgIds[dir] = hit.globalId;
+  }
+  const r = await fetch(`https://www.mvg.de/api/bgw-pt/v3/departures?globalId=${id}&limit=100&transportTypes=BAHN`, { cache: "no-store" });
+  if (!r.ok) throw new Error("MVG " + r.status);
+  return (await r.json()).map((d) => ({
+    line: norm(d.label), planned: new Date(d.plannedDepartureTime), delay: Number(d.delayInMinutes || 0),
+    realtime: !!d.realtime, cancelled: !!d.cancelled, dest: d.destination || "?", platform: d.platform ?? "",
+  }));
+}
+const dbIds = {};
+async function fromDB(dir) {
+  const cfg = DIRS[dir];
+  let id = cfg.db || dbIds[dir];
+  if (!id) {
+    const r = await fetch("https://v6.db.transport.rest/locations?poi=false&addresses=false&results=3&query=" + encodeURIComponent(cfg.dbQuery));
+    if (!r.ok) throw new Error("DB " + r.status);
+    const hit = (await r.json()).find((l) => l.id && /haunstetter/i.test(l.name || ""));
+    if (!hit) throw new Error("DB: Station nicht gefunden");
+    id = dbIds[dir] = hit.id;
+  }
+  const q = "duration=240&results=150&regional=true&national=false&nationalExpress=false&suburban=false&bus=false&subway=false&tram=false&ferry=false&taxi=false";
+  const r = await fetch(`https://v6.db.transport.rest/stops/${id}/departures?${q}`, { cache: "no-store" });
+  if (!r.ok) throw new Error("DB " + r.status);
+  const data = await r.json();
+  return (data.departures || data).map((d) => ({
+    line: norm(d.line && (d.line.name || d.line.id)), planned: new Date(d.plannedWhen || d.when),
+    delay: Math.round((d.delay || 0) / 60), realtime: d.delay !== null && d.delay !== undefined,
+    cancelled: !!d.cancelled, dest: d.direction || "?", platform: d.plannedPlatform || d.platform || "",
+  }));
+}
+async function loadDepartures(dir) {
+  const errors = [];
+  for (const [name, fn] of [["MVG", fromMVG], ["DB", fromDB]]) {
+    try {
+      const cfg = DIRS[dir];
+      const deps = (await fn(dir)).filter((d) => (!cfg.onlyLines || LINES.includes(d.line)) && (!cfg.towards || cfg.towards.test(d.dest)));
+      // MVG may know the station but not these trains (e.g. outside its network): then try DB
+      if (!deps.length && name === "MVG") { errors.push("MVG: keine passenden Züge"); continue; }
+      return { source: name, deps };
+    } catch (e) { errors.push(e.message); }
+  }
+  throw new Error(errors.join(" · "));
+}
+
+// ---- choosing "your train" ----
+function status(d) {
+  if (d.cancelled) return { cls: "bad", text: "fällt aus" };
+  if (d.delay >= DELAY_WARN) return { cls: "warn", text: "+" + d.delay + " Min" };
+  if (d.delay > 0) return { cls: "ok", text: "+" + d.delay + " Min" };
+  return { cls: "ok", text: d.realtime === false ? "planmäßig" : "pünktlich" };
+}
+const where = (d) => d.line + " · " + hm(d.planned) + (d.platform ? " · Gleis " + d.platform : "");
+const cap = (t) => t[0].toUpperCase() + t.slice(1);
+
+function evaluate(deps, from, to, now, lateText) {
+  const inWin = deps.filter((d) => d.planned >= from && d.planned <= to);
+  const disrupted = inWin.filter(isBad);
+  const mine = inWin.find((d) => !isBad(d))
+    || deps.filter((d) => !d.cancelled && d.planned >= from).sort((a, b) => real(a) - real(b))[0] || null;
+  if (!inWin.length && from > now)
+    return { mine, cls: "bad", big: "Kein Zug " + hm(from) + "–" + hm(to),
+             st: mine ? "Nächster Zug: " + where(mine) : "Keine Verbindung gefunden – DB Navigator prüfen" };
+  if (!inWin.length)
+    return { mine, cls: "none", big: mine ? where(mine) : "Kein Zug mehr", st: mine ? "Nächster Zug · " + status(mine).text : "" };
+  if (!disrupted.length)
+    return { mine, cls: "ok", big: where(mine), st: cap(status(mine).text) };
+  const first = disrupted[0];
+  const what = first.line + " " + hm(first.planned) + ": " + status(first).text
+    + (disrupted.length > 1 ? " (+" + (disrupted.length - 1) + " weiterer)" : "");
+  if (mine && mine.planned <= to)
+    return { mine, cls: isBad(mine) ? "bad" : "warn", big: "Nimm " + where(mine) + (mine.delay > 0 ? " (+" + mine.delay + ")" : ""),
+             st: isBad(mine) ? "Alle Züge gestört – das ist der schnellste" : what };
+  if (mine) return { mine, cls: "bad", big: "Nimm " + where(mine), st: what + " · " + lateText };
+  return { mine, cls: "bad", big: "Alle Züge gestört", st: what + " · DB Navigator prüfen" };
+}
+
+// ---- rendering ----
+let dir = null, userPicked = false;
+function autoDir() {
+  const lec = today();
+  return lec && lec.start && new Date() >= at(new Date(), lec.start) ? "home" : "out";
+}
+function setDir(d) {
+  dir = d; $("title").textContent = DIRS[d].title;
+  document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.dir === d)));
+}
+
+function render(result) {
+  const now = new Date();
+  const deps = result.deps
+    .filter((d) => real(d) >= now.getTime() - 60000)
+    .sort((a, b) => a.planned - b.planned).slice(0, 10);
+  const lec = today();
+  let r = { mine: null, cls: "none", big: "", st: "" }, k = "Heute";
+
+  if (dir === "out") {
+    if (!lec || !lec.start) { r.big = "Keine Vorlesung eingetragen"; r.st = "Über ⚙︎ Vorlesungszeiten eintragen"; }
+    else {
+      const lecture = at(now, lec.start); k = "Vorlesung heute " + lec.start;
+      if (lecture < now) { r.big = "Vorlesung hat begonnen"; r.st = "Für den Heimweg: Rückfahrt"; }
+      else r = evaluate(deps, new Date(lecture - OUT_WINDOW[0] * 60000), new Date(lecture - OUT_WINDOW[1] * 60000), now,
+                        "Achtung: kommt später an");
+    }
+  } else {
+    if (!lec || !lec.end) { r.big = "Ende der Vorlesung eintragen"; r.st = "Über ⚙︎, dann zeige ich deinen Zug nach Hause"; }
+    else {
+      const ready = new Date(at(now, lec.end).getTime() + HOME_BUFFER * 60000);
+      k = "Vorlesung endet " + lec.end + " · Zug ab " + hm(ready);
+      r = evaluate(deps, ready, new Date(ready.getTime() + HOME_WINDOW * 60000), now, "Achtung: später zuhause");
+    }
+  }
+  $("hero").className = "card hero " + r.cls;
+  $("hero-k").textContent = k; $("hero-big").textContent = r.big; $("hero-state").textContent = r.st;
+
+  $("list").innerHTML = !deps.length
+    ? `<div class="empty">${dir === "out" ? "Keine RE9/RB86/RB87" : "Keine Regionalzüge nach München"} in den nächsten Stunden.</div>`
+    : deps.map((d) => {
+        const s = status(d);
+        const time = d.delay >= 1 && !d.cancelled ? `${hm(new Date(real(d)))}<s>${hm(d.planned)}</s>` : hm(d.planned);
+        const meta = [d.platform ? "Gleis " + escapeHtml(d.platform) : "", d === r.mine ? "dein Zug" : ""].filter(Boolean).join(" · ");
+        return `<div class="row${d === r.mine ? " mine" : ""}">
+          <div class="time">${time}</div>
+          <div><div class="dest"><span class="chip">${d.line}</span>${escapeHtml(d.dest)}</div><div class="meta">${meta}</div></div>
+          <div class="badge b-${s.cls}">${s.text}</div></div>`;
+      }).join("");
+  $("updated").textContent = "Stand " + hm(now) + " · aktualisiert jede Minute";
+  $("source").textContent = "Daten: " + (result.source === "MVG" ? "MVG" : "DB (transport.rest)");
+}
+
+let busy = false;
+async function refresh() {
+  if (busy) return; busy = true;
+  if (!userPicked) setDir(autoDir());
+  $("refresh").textContent = "…";
+  try { render(await loadDepartures(dir)); }
+  catch (e) {
+    $("list").innerHTML = '<div class="err">Abfahrten konnten nicht geladen werden.<br><small>' + escapeHtml(e.message) + "</small></div>";
+    $("updated").textContent = "Fehler beim Laden";
+    $("hero").className = "card hero bad"; $("hero-k").textContent = "Keine Live-Daten";
+    $("hero-big").textContent = "Bitte DB Navigator nutzen"; $("hero-state").textContent = "Gleich nochmal mit ↻ versuchen";
+  } finally { busy = false; $("refresh").textContent = "↻"; }
+}
+
+// ---- settings dialog ----
+function openSettings() {
+  const v = loadLectures();
+  $("days").innerHTML = '<div class="day head"><span></span><span>Beginn</span><span>Ende</span></div>' +
+    DAYS.map((name, i) => `<div class="day"><span title="${name}">${SHORT[i]}</span>
+      <input type="time" name="s${i}" value="${(v[i] && v[i].start) || ""}" aria-label="${name} Beginn">
+      <input type="time" name="e${i}" value="${(v[i] && v[i].end) || ""}" aria-label="${name} Ende"></div>`).join("");
+  $("dlg").showModal();
+}
+$("dlg").addEventListener("close", () => {
+  if ($("dlg").returnValue !== "save") return;
+  const v = {}, f = $("form").elements;
+  DAYS.forEach((_, i) => { const s = f["s" + i].value, e = f["e" + i].value; if (s || e) v[i] = { start: s, end: e }; });
+  saveLectures(v); userPicked = false; refresh();
+});
+document.querySelectorAll(".tabs button").forEach((b) =>
+  b.addEventListener("click", () => { userPicked = true; setDir(b.dataset.dir); refresh(); }));
+$("settings").addEventListener("click", openSettings);
+$("refresh").addEventListener("click", refresh);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+setInterval(refresh, 60000);
+refresh();
+</script>
+
+</body>
+</html>
