@@ -164,7 +164,7 @@ const today = () => loadLectures()[new Date().getDay() - 1] || null;   // getDay
 const REGIONAL = 13;   // EFA product class for regional trains (RE/RB)
 // The MVV server doesn't let websites load its data directly (CORS), so requests go through
 // a small Cloudflare Worker (relay/worker.js). Put its address here:
-const RELAY = "";
+const RELAY = "https://zug-relay.liam-galetzki0.workers.dev";
 async function loadDepartures(dir) {
   const cfg = DIRS[dir];
   if (!RELAY) throw new Error("Relay-Adresse fehlt (RELAY in index.html)");
