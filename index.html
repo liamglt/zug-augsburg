@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Zug Augsburg</title>
-<meta name="description" content="Live-Abfahrten München Hbf ↔ Augsburg (RE9, RB86, RB87) für Hin- und Rückfahrt">
+<meta name="description" content="Live-Abfahrten München Hbf ↔ Augsburg für Hin- und Rückfahrt">
 <meta name="theme-color" content="#0f172a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -128,7 +128,7 @@
 </dialog>
 
 <script>
-const LINES = ["RE9", "RE86", "RE87", "RB86", "RB87"];   // 86/87 run as RB or RE depending on the train
+const LINES = ["RE9", "RE86", "RE87", "RB86", "RB87", "RE80", "RE89"];   // all regional lines München Hbf -> Augsburg
 const DELAY_WARN = 5;
 const OUT_WINDOW = [80, 40];       // way there: "your train" leaves 80-40 min before the first lecture
 const HOME_BUFFER = 20;            // way home: earliest train 20 min after the last lecture ends ...
@@ -137,11 +137,10 @@ const DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
 const SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 const KEY = "train-board-lectures";
 const DIRS = {
-  // way there: only her lines; München Hbf is a terminus, so every one of them leaves towards Augsburg
-  out:  { title: "München Hbf → Augsburg", mvgId: "de:09162:6", db: "8000261", onlyLines: true, towards: null },
-  // way home: any regional train from Haunstetter Straße heading to München (lines stopping there may differ)
-  home: { title: "Haunstetter Str. → München", query: "Haunstetter", placeMatch: /augsburg/i,
-          dbQuery: "Augsburg Haunstetterstraße", onlyLines: false, towards: /münchen/i },
+  // way there: her lines from München Hbf (a terminus, so all of them leave towards Augsburg)
+  out:  { title: "München Hbf → Augsburg", stop: "de:09162:100", onlyLines: true, towards: null },
+  // way home: every regional train from Bahnhof Haunstetterstraße heading to München
+  home: { title: "Haunstetterstr. → München", stop: "de:09761:111", onlyLines: false, towards: /münchen/i },
 };
 const $ = (id) => document.getElementById(id);
 const norm = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
@@ -161,59 +160,27 @@ function loadLectures() {
 function saveLectures(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} }
 const today = () => loadLectures()[new Date().getDay() - 1] || null;   // getDay: 0=Sun, 1=Mon
 
-// ---- data: MVG first, DB (transport.rest) as fallback ----
-const mvgIds = {};
-async function fromMVG(dir) {
-  const cfg = DIRS[dir];
-  let id = cfg.mvgId || mvgIds[dir];
-  if (!id) {
-    const r = await fetch("https://www.mvg.de/api/bgw-pt/v3/locations?locationTypes=STATION&query=" + encodeURIComponent(cfg.query));
-    if (!r.ok) throw new Error("MVG " + r.status);
-    const locs = (await r.json()).filter((l) => l.globalId && cfg.placeMatch.test((l.name || "") + " " + (l.place || "")));
-    const hit = locs.find((l) => /bahnhof/i.test(l.name || "")) || locs[0];   // the train station, not a tram/bus stop
-    if (!hit) throw new Error("MVG: Station nicht gefunden");
-    id = mvgIds[dir] = hit.globalId;
-  }
-  const r = await fetch(`https://www.mvg.de/api/bgw-pt/v3/departures?globalId=${id}&limit=100&transportTypes=BAHN`, { cache: "no-store" });
-  if (!r.ok) throw new Error("MVG " + r.status);
-  return (await r.json()).map((d) => ({
-    line: norm(d.label), planned: new Date(d.plannedDepartureTime), delay: Number(d.delayInMinutes || 0),
-    realtime: !!d.realtime, cancelled: !!d.cancelled, dest: d.destination || "?", platform: d.platform ?? "",
-  }));
-}
-const dbIds = {};
-async function fromDB(dir) {
-  const cfg = DIRS[dir];
-  let id = cfg.db || dbIds[dir];
-  if (!id) {
-    const r = await fetch("https://v6.db.transport.rest/locations?poi=false&addresses=false&results=3&query=" + encodeURIComponent(cfg.dbQuery));
-    if (!r.ok) throw new Error("DB " + r.status);
-    const hit = (await r.json()).find((l) => l.id && /haunstetter/i.test(l.name || ""));
-    if (!hit) throw new Error("DB: Station nicht gefunden");
-    id = dbIds[dir] = hit.id;
-  }
-  const q = "duration=240&results=150&regional=true&national=false&nationalExpress=false&suburban=false&bus=false&subway=false&tram=false&ferry=false&taxi=false";
-  const r = await fetch(`https://v6.db.transport.rest/stops/${id}/departures?${q}`, { cache: "no-store" });
-  if (!r.ok) throw new Error("DB " + r.status);
-  const data = await r.json();
-  return (data.departures || data).map((d) => ({
-    line: norm(d.line && (d.line.name || d.line.id)), planned: new Date(d.plannedWhen || d.when),
-    delay: Math.round((d.delay || 0) / 60), realtime: d.delay !== null && d.delay !== undefined,
-    cancelled: !!d.cancelled, dest: d.direction || "?", platform: d.plannedPlatform || d.platform || "",
-  }));
-}
+// ---- data: MVV timetable server (EFA, behind the MVV app), includes DB regional trains ----
+const REGIONAL = 13;   // EFA product class for regional trains (RE/RB)
 async function loadDepartures(dir) {
-  const errors = [];
-  for (const [name, fn] of [["MVG", fromMVG], ["DB", fromDB]]) {
-    try {
-      const cfg = DIRS[dir];
-      const deps = (await fn(dir)).filter((d) => (!cfg.onlyLines || LINES.includes(d.line)) && (!cfg.towards || cfg.towards.test(d.dest)));
-      // MVG may know the station but not these trains (e.g. outside its network): then try DB
-      if (!deps.length && name === "MVG") { errors.push("MVG: keine passenden Züge"); continue; }
-      return { source: name, deps };
-    } catch (e) { errors.push(e.message); }
-  }
-  throw new Error(errors.join(" · "));
+  const cfg = DIRS[dir];
+  const q = new URLSearchParams({ outputFormat: "rapidJSON", type_dm: "stop", name_dm: cfg.stop, mode: "direct",
+                                  useRealtime: "1", limit: "150" });
+  const r = await fetch("https://efa.mvv-muenchen.de/ng/XML_DM_REQUEST?" + q, { cache: "no-store" });
+  if (!r.ok) throw new Error("MVV " + r.status);
+  const data = await r.json();
+  const deps = (data.stopEvents || []).map((e) => {
+    const tr = e.transportation || {}, props = (e.location && e.location.properties) || {};
+    const planned = new Date(e.departureTimePlanned), est = e.departureTimeEstimated ? new Date(e.departureTimeEstimated) : null;
+    return {
+      line: norm(tr.number || tr.disassembledName), cls: tr.product && tr.product.class,
+      planned, delay: est ? Math.max(0, Math.round((est - planned) / 60000)) : 0, realtime: !!est,
+      cancelled: !!e.isCancelled, dest: (tr.destination && tr.destination.name) || "?",
+      platform: props.platformName || props.platform || "",
+    };
+  }).filter((d) => !isNaN(d.planned) && (cfg.onlyLines ? LINES.includes(d.line) : d.cls === REGIONAL)
+                   && (!cfg.towards || cfg.towards.test(d.dest)));
+  return { source: "MVV", deps };
 }
 
 // ---- choosing "your train" ----
@@ -287,7 +254,7 @@ function render(result) {
   $("hero-k").textContent = k; $("hero-big").textContent = r.big; $("hero-state").textContent = r.st;
 
   $("list").innerHTML = !deps.length
-    ? `<div class="empty">${dir === "out" ? "Keine RE9/RB86/RB87" : "Keine Regionalzüge nach München"} in den nächsten Stunden.</div>`
+    ? `<div class="empty">${dir === "out" ? "Keine Züge nach Augsburg" : "Keine Regionalzüge nach München"} in den nächsten Stunden.</div>`
     : deps.map((d) => {
         const s = status(d);
         const time = d.delay >= 1 && !d.cancelled ? `${hm(new Date(real(d)))}<s>${hm(d.planned)}</s>` : hm(d.planned);
@@ -298,7 +265,7 @@ function render(result) {
           <div class="badge b-${s.cls}">${s.text}</div></div>`;
       }).join("");
   $("updated").textContent = "Stand " + hm(now) + " · aktualisiert jede Minute";
-  $("source").textContent = "Daten: " + (result.source === "MVG" ? "MVG" : "DB (transport.rest)");
+  $("source").textContent = "Daten: MVV";
 }
 
 let busy = false;
