@@ -73,6 +73,25 @@
   .onward .tag { font-size: 12px; color: var(--muted); }
   .onward .late { color: var(--warn); font-weight: 600; }
   .chip.u { background: #0065ae; }
+  .opt { font: inherit; font-size: 15px; font-weight: 700; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 10px; padding: 4px 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+  .opt.sel { border-color: var(--ok); box-shadow: 0 0 0 2px var(--ok) inset; }
+  .opt .chip { margin-right: 2px; }
+  .confirm { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--ok-bg); font-size: 14px; }
+  .confirm .row { display: flex; gap: 8px; margin-top: 8px; }
+  .confirm button { font: inherit; font-weight: 700; border: 0; border-radius: 10px; padding: 9px 14px; cursor: pointer; }
+  .confirm .go { background: var(--ok); color: #fff; flex: 1; }
+  .confirm .no { background: var(--card); color: var(--text); }
+  .fahrt { border: 2px solid var(--ok); }
+  .fahrt.warn { border-color: var(--warn); } .fahrt.bad { border-color: var(--bad); }
+  .fahrt .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .fahrt .head b { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .fahrt .end { font: inherit; font-size: 13px; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 4px; }
+  .fahrt .step { display: flex; align-items: baseline; gap: 6px; padding: 7px 0; font-size: 15px; flex-wrap: wrap; }
+  .fahrt .step .t { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .fahrt .chg { font-size: 13px; color: var(--muted); padding: 2px 0 2px 4px; border-left: 2px dashed var(--line); margin-left: 14px; }
+  .fahrt .state { margin-top: 6px; font-weight: 700; }
+  .fahrt.ok .state { color: var(--ok); } .fahrt.warn .state { color: var(--warn); } .fahrt.bad .state { color: var(--bad); }
   .gap { text-align: center; color: var(--muted); padding: 4px 0; border-top: 1px solid var(--line); letter-spacing: 4px; }
   .err { color: var(--bad); }
   .foot { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
@@ -110,6 +129,8 @@
       <button class="icon-btn" id="settings" aria-label="Vorlesungszeiten">⚙︎</button>
     </div>
   </header>
+
+  <div class="card fahrt" id="fahrt" hidden></div>
 
   <div class="tabs" id="dayTabs" role="tablist" aria-label="Tag">
     <button role="tab" data-day="0" aria-selected="true">Heute</button>
@@ -361,7 +382,8 @@ async function renderOnward() {
   const box = $("onward"), last = render.last;
   if (dir !== "home" || !last || !last.mine) { box.hidden = true; return; }
   const trains = [last.mine, last.upcoming.find((d) => d.planned > last.mine.planned && !d.cancelled)].filter(Boolean);
-  let html = '<div class="k">Weiter nach Hause · → Feldmoching</div>';
+  onwardOptions = [];
+  let html = '<div class="k">Weiter nach Hause · → Feldmoching · antippen zum Bestätigen</div>';
   try {
     const trips = await relayJSON("trip=home", new Date(trains[0].planned.getTime() - 60000));
     for (const [i, t] of trains.entries()) {
@@ -372,18 +394,108 @@ async function renderOnward() {
       html += "an <b>" + hm(a.est) + "</b>" + (a.delay ? ' <span class="late">+' + a.delay + "</span>" : "")
             + (a.platform ? " · Gl. " + escapeHtml(a.platform) : "") + "</div>";
       const u = await u2After(new Date(a.est.getTime() + U2_CHANGE_MIN * 60000));
-      html += '<div class="u2"><span class="chip u">U2</span><span class="tag">ab ' + hm(new Date(a.est.getTime() + U2_CHANGE_MIN * 60000)) + ":</span> " + (u.length
-        ? u.map((x) => "<b>" + hm(x.est) + "</b>" + (x.delay ? ' <span class="late">+' + x.delay + "</span>" : "")).join(" · ")
-        : "keine Abfahrt gefunden") + "</div>";
       const r = await regioAfter(a.est).catch(() => []);
-      html += r.map((x) => '<div class="u2"><span class="chip">' + x.line + '</span><b>' + hm(x.est) + "</b>"
-        + (x.delay ? ' <span class="late">+' + x.delay + "</span>" : "") + (x.platform ? ' <span class="tag">Gl. ' + escapeHtml(x.platform) + "</span>" : "")
-        + "</div>").join("") + "</div>";
+      const pill = (x) => {   // a tappable option: this train + this connection
+        const i = onwardOptions.push({ train: t, arr: a, next: { line: x.line, planned: x.planned, est: x.est, platform: x.platform || "" } }) - 1;
+        const sel = picked === optKey(onwardOptions[i]) ? " sel" : "";
+        return '<button class="opt' + sel + '" data-i="' + i + '"><span class="chip' + (x.line === "U2" ? " u" : "") + '">' + x.line + "</span>"
+          + hm(x.est) + (x.delay ? ' <span class="late">+' + x.delay + "</span>" : "")
+          + (x.platform ? ' <span class="tag">Gl. ' + escapeHtml(x.platform) + "</span>" : "") + "</button>";
+      };
+      html += '<div class="u2"><span class="tag">ab ' + hm(new Date(a.est.getTime() + U2_CHANGE_MIN * 60000)) + ":</span> "
+        + (u.length || r.length ? u.map(pill).join("") + r.map(pill).join("") : "keine Abfahrt gefunden") + "</div></div>";
     }
   } catch (e) {
     html += '<div class="trip"><div class="leg tag">Anschluss gerade nicht abrufbar</div></div>';
   }
-  box.innerHTML = html; box.hidden = false;
+  box.innerHTML = html + '<div id="confirmBar"></div>'; box.hidden = false;
+  drawConfirm();
+}
+
+// ---- confirmed journey: stays visible (and live) until she's home ----
+const TRIP_KEY = "zug-augsburg-fahrt";
+let onwardOptions = [], picked = null;
+const optKey = (o) => o.train.line + o.train.planned.getTime() + o.next.line + new Date(o.next.planned).getTime();
+function drawConfirm() {
+  const bar = $("confirmBar"); if (!bar) return;
+  const o = onwardOptions.find((x) => optKey(x) === picked);
+  if (!o) { bar.innerHTML = ""; return; }
+  bar.innerHTML = '<div class="confirm">' + o.train.line + " " + hm(o.train.planned) + " → Hbf " + hm(o.arr.est) + " → <b>"
+    + o.next.line + " " + hm(o.next.est) + "</b> nach Feldmoching<div class=\"row\">"
+    + '<button class="go" id="confirmGo">Bestätigen ✓</button><button class="no" id="confirmNo">Abbrechen</button></div></div>';
+}
+$("onward").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button"); if (!b) return;
+  if (b.id === "confirmNo") { picked = null; }
+  else if (b.id === "confirmGo") {
+    const o = onwardOptions.find((x) => optKey(x) === picked);
+    if (o) saveTrip({ train: { line: o.train.line, planned: o.train.planned, delay: o.train.delay, platform: o.train.platform },
+                      arr: { planned: o.arr.planned, est: o.arr.est, platform: o.arr.platform }, next: o.next });
+    picked = null; drawTrip(); updateTrip();
+  } else if (b.dataset.i) { const k = optKey(onwardOptions[+b.dataset.i]); picked = picked === k ? null : k; }
+  document.querySelectorAll("#onward .opt").forEach((x) => x.classList.toggle("sel", picked === optKey(onwardOptions[+x.dataset.i])));
+  drawConfirm();
+});
+function loadTrip() {
+  try {
+    const t = JSON.parse(localStorage.getItem(TRIP_KEY)); if (!t) return null;
+    for (const o of [t.train, t.arr, t.next]) for (const k of ["planned", "est"]) if (o[k]) o[k] = new Date(o[k]);
+    if (Date.now() > t.next.est.getTime() + 45 * 60000) { localStorage.removeItem(TRIP_KEY); return null; }   // she's home
+    return t;
+  } catch { return null; }
+}
+function saveTrip(t) { try { localStorage.setItem(TRIP_KEY, JSON.stringify(t)); } catch {} }
+function drawTrip(alt) {
+  const box = $("fahrt"), t = loadTrip();
+  if (!t) { box.hidden = true; return; }
+  const need = t.next.line === "U2" ? U2_CHANGE_MIN : REGIO_CHANGE_MIN;
+  const change = Math.round((t.next.est - t.arr.est) / 60000), now = Date.now();
+  const late = (d) => d ? ' <span class="late">+' + d + "</span>" : "";
+  const arrDelay = Math.max(0, Math.round((t.arr.est - t.arr.planned) / 60000));
+  const nextDelay = Math.max(0, Math.round((t.next.est - new Date(t.next.planned)) / 60000));
+  let cls = "ok", state;
+  if (t.arr.cancelled) { cls = "bad"; state = t.train.line + " fällt aus – DB Navigator prüfen"; }
+  else if (t.next.cancelled || change < need) {
+    cls = "bad"; state = (t.next.cancelled ? t.next.line + " fällt aus" : "Anschluss wird knapp verpasst")
+      + (alt ? " – nächste U2 " + hm(alt.est) : "");
+  } else if (change < need + 2) { cls = "warn"; state = "Knapp: " + change + " Min Umstieg"; }
+  else state = now > t.next.est ? "Gute Heimfahrt!" : "Anschluss klappt · " + change + " Min Umstieg";
+  box.className = "card fahrt " + cls;
+  box.innerHTML = '<div class="head"><b>Deine Fahrt</b><button class="end" id="tripEnd">Beenden ✕</button></div>'
+    + '<div class="step"><span class="chip">' + escapeHtml(t.train.line) + '</span><span class="t">' + hm(t.train.planned) + "</span>"
+    + late(t.train.delay) + "Haunstetterstr. → Hbf an <b>" + hm(t.arr.est) + "</b>" + late(arrDelay)
+    + (t.arr.platform ? ' <span class="tag">Gl. ' + escapeHtml(t.arr.platform) + "</span>" : "") + "</div>"
+    + '<div class="chg">Umstieg in München Hbf · ' + (change >= 0 ? change + " Min" : "reicht nicht") + "</div>"
+    + '<div class="step"><span class="chip' + (t.next.line === "U2" ? " u" : "") + '">' + escapeHtml(t.next.line) + '</span><span class="t">'
+    + hm(t.next.est) + "</span>" + late(nextDelay) + "Hbf → Feldmoching"
+    + (t.next.platform ? ' <span class="tag">Gl. ' + escapeHtml(t.next.platform) + "</span>" : "") + "</div>"
+    + '<div class="state">' + state + "</div>";
+  box.hidden = false;
+  $("tripEnd").onclick = () => { try { localStorage.removeItem(TRIP_KEY); } catch {} box.hidden = true; };
+}
+// refresh the saved journey with live data: her train's Hbf arrival and the connection's departure
+async function updateTrip() {
+  const t = loadTrip(); if (!t) { $("fahrt").hidden = true; return; }
+  drawTrip();
+  try {
+    const trips = await relayJSON("trip=home", new Date(t.train.planned.getTime() - 60000));
+    const a = arrivalFor(t.train, trips.journeys || []);
+    if (a) { t.arr = { planned: a.planned, est: a.est, platform: a.platform || t.arr.platform, cancelled: a.cancelled };
+             t.train.delay = a.delay; }
+  } catch (e) { /* keep what we had */ }
+  try {
+    const np = new Date(t.next.planned);
+    const data = await relayJSON("stop=" + encodeURIComponent(t.next.line === "U2" ? U2_STOP : DIRS.out.stop), new Date(np.getTime() - 60000));
+    const e = (data.stopEvents || []).find((x) => norm((x.transportation || {}).number) === t.next.line
+                                             && Math.abs(new Date(x.departureTimePlanned) - np) <= 60000);
+    if (e) { t.next.est = e.departureTimeEstimated ? new Date(e.departureTimeEstimated) : np; t.next.cancelled = !!e.isCancelled; }
+  } catch (e) { /* keep */ }
+  saveTrip(t);
+  const need = t.next.line === "U2" ? U2_CHANGE_MIN : REGIO_CHANGE_MIN;
+  let alt = null;
+  if (t.next.cancelled || t.next.est - t.arr.est < need * 60000)
+    alt = (await u2After(new Date(t.arr.est.getTime() + U2_CHANGE_MIN * 60000)).catch(() => []))[0] || null;
+  drawTrip(alt);
 }
 
 let busy = false;
@@ -406,11 +518,11 @@ async function refresh() {
       } catch (e) { /* keep the first batch; the top card then says it's too early */ }
     }
     render(res);
-    await renderOnward();
+    await Promise.all([renderOnward(), updateTrip()]);
   }
   catch (e) {
     $("list").innerHTML = '<div class="err">Abfahrten konnten nicht geladen werden.<br><small>' + escapeHtml(e.message) + "</small></div>";
-    $("updated").textContent = "Fehler beim Laden"; $("onward").hidden = true;
+    $("updated").textContent = "Fehler beim Laden"; $("onward").hidden = true; drawTrip();
     $("hero").className = "card hero bad"; $("hero-k").textContent = "Keine Live-Daten";
     $("hero-big").textContent = "Bitte DB Navigator nutzen"; $("hero-state").textContent = "Gleich nochmal mit ↻ versuchen";
   } finally { busy = false; $("refresh").textContent = "↻"; }
@@ -442,6 +554,7 @@ $("settings").addEventListener("click", openSettings);
 $("refresh").addEventListener("click", refresh);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 setInterval(refresh, 60000);
+drawTrip();   // show a saved journey right away, even before (or without) live data
 refresh();
 </script>
 
