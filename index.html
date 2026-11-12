@@ -65,6 +65,7 @@
   .b-warn { color: var(--warn); background: var(--warn-bg); }
   .b-bad { color: var(--bad); background: var(--bad-bg); }
   .empty, .err { padding: 18px 16px; color: var(--muted); }
+  .gap { text-align: center; color: var(--muted); padding: 4px 0; border-top: 1px solid var(--line); letter-spacing: 4px; }
   .err { color: var(--bad); }
   .foot { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
   dialog { border: 0; border-radius: 18px; padding: 0; width: min(96vw, 420px); background: var(--card); color: var(--text); }
@@ -165,13 +166,25 @@ const REGIONAL = 13;   // EFA product class for regional trains (RE/RB)
 // The MVV server doesn't let websites load its data directly (CORS), so requests go through
 // a small Cloudflare Worker (relay/worker.js). Put its address here:
 const RELAY = "https://zug-relay.liam-galetzki0.workers.dev";
-async function loadDepartures(dir) {
+// Berlin date/time strings for MVV's "departures from ..." option
+function berlinStamp(d) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d).map((x) => [x.type, x.value]));
+  return { date: p.year + p.month + p.day, time: p.hour + p.minute };
+}
+// start: optional Date - departures from then on (MVV only sends ~150, mostly trams, so a later
+// train window needs its own request). Returns deps plus "horizon": how far the data reaches.
+async function loadDepartures(dir, start = null) {
   const cfg = DIRS[dir];
   if (!RELAY) throw new Error("Relay-Adresse fehlt (RELAY in index.html)");
-  const r = await fetch(RELAY.replace(/\/$/, "") + "/?stop=" + encodeURIComponent(cfg.stop), { cache: "no-store" });
+  let url = RELAY.replace(/\/$/, "") + "/?stop=" + encodeURIComponent(cfg.stop);
+  if (start) { const b = berlinStamp(start); url += "&date=" + b.date + "&time=" + b.time; }
+  const r = await fetch(url, { cache: "no-store" });
   if (!r.ok) throw new Error("MVV " + r.status);
   const data = await r.json();
-  const deps = (data.stopEvents || []).map((e) => {
+  const events = data.stopEvents || [];
+  const horizon = new Date(Math.max(0, ...events.map((e) => Date.parse(e.departureTimePlanned) || 0)));
+  const deps = events.map((e) => {
     const tr = e.transportation || {}, props = (e.location && e.location.properties) || {};
     const planned = new Date(e.departureTimePlanned), est = e.departureTimeEstimated ? new Date(e.departureTimeEstimated) : null;
     return {
@@ -182,7 +195,7 @@ async function loadDepartures(dir) {
     };
   }).filter((d) => !isNaN(d.planned) && (cfg.onlyLines ? LINES.includes(d.line) : d.cls === REGIONAL)
                    && (!cfg.towards || cfg.towards.test(d.dest)));
-  return { source: "MVV", deps };
+  return { source: "MVV", deps, horizon };
 }
 
 // ---- choosing "your train" ----
@@ -195,7 +208,9 @@ function status(d) {
 const where = (d) => d.line + " · " + hm(d.planned) + (d.platform ? " · Gleis " + d.platform : "");
 const cap = (t) => t[0].toUpperCase() + t.slice(1);
 
-function evaluate(deps, from, to, now, lateText) {
+function evaluate(deps, from, to, now, lateText, horizon) {
+  if (horizon && to > horizon && !deps.some((d) => d.planned >= from && d.planned <= to))
+    return { mine: null, cls: "none", big: "Zug " + hm(from) + "–" + hm(to), st: "Noch keine Daten so weit im Voraus – später nochmal schauen" };
   const inWin = deps.filter((d) => d.planned >= from && d.planned <= to);
   const disrupted = inWin.filter(isBad);
   const mine = inWin.find((d) => !isBad(d))
@@ -228,44 +243,45 @@ function setDir(d) {
   document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.dir === d)));
 }
 
+// today's train window for the current tab: { from, to, k, lateText } or { k, big, st } if there is none
+function trainWindow(now) {
+  const lec = today();
+  if (dir === "out") {
+    if (!lec || !lec.start) return { k: "Heute", big: "Keine Vorlesung eingetragen", st: "Über ⚙︎ Vorlesungszeiten eintragen" };
+    const lecture = at(now, lec.start), k = "Vorlesung heute " + lec.start;
+    if (lecture < now) return { k, big: "Vorlesung hat begonnen", st: "Für den Heimweg: Rückfahrt" };
+    return { k, from: new Date(lecture - OUT_WINDOW[0] * 60000), to: new Date(lecture - OUT_WINDOW[1] * 60000),
+             lateText: "Achtung: kommt später an" };
+  }
+  if (!lec || !lec.end) return { k: "Heute", big: "Ende der Vorlesung eintragen", st: "Über ⚙︎, dann zeige ich deinen Zug nach Hause" };
+  const ready = new Date(at(now, lec.end).getTime() + HOME_BUFFER * 60000);
+  return { k: "Vorlesung endet " + lec.end + " · Zug ab " + hm(ready), from: ready,
+           to: new Date(ready.getTime() + HOME_WINDOW * 60000), lateText: "Achtung: später zuhause" };
+}
+
 function render(result) {
   const now = new Date();
-  const deps = result.deps
-    .filter((d) => real(d) >= now.getTime() - 60000)
-    .sort((a, b) => a.planned - b.planned).slice(0, 10);
-  const lec = today();
-  let r = { mine: null, cls: "none", big: "", st: "" }, k = "Heute";
-
-  if (dir === "out") {
-    if (!lec || !lec.start) { r.big = "Keine Vorlesung eingetragen"; r.st = "Über ⚙︎ Vorlesungszeiten eintragen"; }
-    else {
-      const lecture = at(now, lec.start); k = "Vorlesung heute " + lec.start;
-      if (lecture < now) { r.big = "Vorlesung hat begonnen"; r.st = "Für den Heimweg: Rückfahrt"; }
-      else r = evaluate(deps, new Date(lecture - OUT_WINDOW[0] * 60000), new Date(lecture - OUT_WINDOW[1] * 60000), now,
-                        "Achtung: kommt später an");
-    }
-  } else {
-    if (!lec || !lec.end) { r.big = "Ende der Vorlesung eintragen"; r.st = "Über ⚙︎, dann zeige ich deinen Zug nach Hause"; }
-    else {
-      const ready = new Date(at(now, lec.end).getTime() + HOME_BUFFER * 60000);
-      k = "Vorlesung endet " + lec.end + " · Zug ab " + hm(ready);
-      r = evaluate(deps, ready, new Date(ready.getTime() + HOME_WINDOW * 60000), now, "Achtung: später zuhause");
-    }
-  }
+  const upcoming = result.deps.filter((d) => real(d) >= now.getTime() - 60000).sort((a, b) => a.planned - b.planned);
+  const w = trainWindow(now);
+  const r = w.from ? evaluate(upcoming, w.from, w.to, now, w.lateText, result.horizon)
+                   : { mine: null, cls: "none", big: w.big, st: w.st };
   $("hero").className = "card hero " + r.cls;
-  $("hero-k").textContent = k; $("hero-big").textContent = r.big; $("hero-state").textContent = r.st;
+  $("hero-k").textContent = w.k; $("hero-big").textContent = r.big; $("hero-state").textContent = r.st;
 
-  $("list").innerHTML = !deps.length
+  const list = upcoming.slice(0, 10);
+  const later = r.mine && !list.includes(r.mine);   // her train is further ahead: show it below the next trains
+  const row = (d) => {
+    const s = status(d);
+    const time = d.delay >= 1 && !d.cancelled ? `${hm(new Date(real(d)))}<s>${hm(d.planned)}</s>` : hm(d.planned);
+    const meta = [d.platform ? "Gleis " + escapeHtml(d.platform) : "", d === r.mine ? "dein Zug" : ""].filter(Boolean).join(" · ");
+    return `<div class="row${d === r.mine ? " mine" : ""}">
+      <div class="time">${time}</div>
+      <div><div class="dest"><span class="chip">${d.line}</span>${escapeHtml(d.dest)}</div><div class="meta">${meta}</div></div>
+      <div class="badge b-${s.cls}">${s.text}</div></div>`;
+  };
+  $("list").innerHTML = !list.length
     ? `<div class="empty">${dir === "out" ? "Keine Züge nach Augsburg" : "Keine Regionalzüge nach München"} in den nächsten Stunden.</div>`
-    : deps.map((d) => {
-        const s = status(d);
-        const time = d.delay >= 1 && !d.cancelled ? `${hm(new Date(real(d)))}<s>${hm(d.planned)}</s>` : hm(d.planned);
-        const meta = [d.platform ? "Gleis " + escapeHtml(d.platform) : "", d === r.mine ? "dein Zug" : ""].filter(Boolean).join(" · ");
-        return `<div class="row${d === r.mine ? " mine" : ""}">
-          <div class="time">${time}</div>
-          <div><div class="dest"><span class="chip">${d.line}</span>${escapeHtml(d.dest)}</div><div class="meta">${meta}</div></div>
-          <div class="badge b-${s.cls}">${s.text}</div></div>`;
-      }).join("");
+    : list.map(row).join("") + (later ? '<div class="gap">· · ·</div>' + row(r.mine) : "");
   $("updated").textContent = "Stand " + hm(now) + " · aktualisiert jede Minute";
   $("source").textContent = "Daten: MVV";
 }
@@ -275,7 +291,19 @@ async function refresh() {
   if (busy) return; busy = true;
   if (!userPicked) setDir(autoDir());
   $("refresh").textContent = "…";
-  try { render(await loadDepartures(dir)); }
+  try {
+    const res = await loadDepartures(dir);
+    const w = trainWindow(new Date());
+    if (w.from && w.to > res.horizon) {   // her window is further ahead than the first batch reaches
+      try {
+        const more = await loadDepartures(dir, new Date(w.from.getTime() - 15 * 60000));
+        const seen = new Set(res.deps.map((d) => d.line + d.planned.getTime()));
+        res.deps.push(...more.deps.filter((d) => !seen.has(d.line + d.planned.getTime())));
+        res.horizon = new Date(Math.max(res.horizon, more.horizon));
+      } catch (e) { /* keep the first batch; the top card then says it's too early */ }
+    }
+    render(res);
+  }
   catch (e) {
     $("list").innerHTML = '<div class="err">Abfahrten konnten nicht geladen werden.<br><small>' + escapeHtml(e.message) + "</small></div>";
     $("updated").textContent = "Fehler beim Laden";

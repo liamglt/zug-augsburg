@@ -18,11 +18,18 @@ export default {
     };
     if (request.method === "OPTIONS") return new Response(null, { headers: cors });
 
-    const stop = new URL(request.url).searchParams.get("stop");
+    const params = new URL(request.url).searchParams;
+    const stop = params.get("stop");
     if (!STOPS.has(stop)) return new Response("unknown stop", { status: 400, headers: cors });
 
     const q = new URLSearchParams({ outputFormat: "rapidJSON", type_dm: "stop", name_dm: stop, mode: "direct",
                                     useRealtime: "1", limit: "150" });
+    // optional "departures from": date=YYYYMMDD, time=HHMM (Berlin time)
+    const date = params.get("date"), time = params.get("time");
+    if (date && time) {
+      if (!/^\d{8}$/.test(date) || !/^\d{4}$/.test(time)) return new Response("bad date/time", { status: 400, headers: cors });
+      q.set("itdDate", date); q.set("itdTime", time);
+    }
     const upstream = await fetch(`${EFA}?${q}`, { headers: { "User-Agent": "zug-augsburg-relay/1.0" },
                                                  cf: { cacheTtl: 30, cacheEverything: true } });
     return new Response(upstream.body, {
