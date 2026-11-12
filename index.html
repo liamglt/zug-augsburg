@@ -230,12 +230,13 @@ const cap = (t) => t[0].toUpperCase() + t.slice(1);
 function evaluate(deps, from, to, now, lateText, horizon) {
   if (to < now)   // today's window is over
     return { mine: null, cls: "none", big: "Für heute vorbei", st: "Für den nächsten Tag: oben auf „Morgen“ tippen" };
-  if (horizon && to > horizon && !deps.some((d) => d.planned >= from && d.planned <= to))
+  if (horizon && to > horizon && !deps.some((d) => real(d) >= from.getTime() && d.planned <= to))
     return { mine: null, cls: "none", big: "Zug " + hm(from) + "–" + hm(to), st: "Noch keine Daten so weit im Voraus – später nochmal schauen" };
-  const inWin = deps.filter((d) => d.planned >= from && d.planned <= to);
+  // a train counts if it really leaves after "from" (a late earlier train can still be hers) and was due by "to"
+  const inWin = deps.filter((d) => real(d) >= from.getTime() && d.planned <= to);
   const disrupted = inWin.filter(isBad);
   const mine = inWin.find((d) => !isBad(d))
-    || deps.filter((d) => !d.cancelled && d.planned >= from).sort((a, b) => real(a) - real(b))[0] || null;
+    || deps.filter((d) => !d.cancelled && real(d) >= from.getTime()).sort((a, b) => real(a) - real(b))[0] || null;
   if (!inWin.length && from > now)
     return { mine, cls: "bad", big: "Kein Zug " + hm(from) + "–" + hm(to),
              st: mine ? "Nächster Zug: " + where(mine) : "Keine Verbindung gefunden – DB Navigator prüfen" };
@@ -374,7 +375,9 @@ async function refresh() {
   try {
     const w = trainWindow(new Date());
     const tomorrowStart = dayOffset ? (w.from ? new Date(w.from.getTime() - 15 * 60000) : at(baseDay(new Date()), "07:00")) : null;
-    const res = await loadDepartures(dir, tomorrowStart);
+    // today: ask MVV from an hour ago - it lists trains by timetable time, so without this a train that is
+    // e.g. 30 min late drops out of the list once its timetable time has passed
+    const res = await loadDepartures(dir, tomorrowStart || new Date(Date.now() - 60 * 60000));
     if (w.from && w.to > res.horizon) {   // her window is further ahead than the first batch reaches
       try {
         const more = await loadDepartures(dir, new Date(w.from.getTime() - 15 * 60000));
