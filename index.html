@@ -132,7 +132,7 @@
 const LINES = ["RE9", "RE86", "RE87", "RB86", "RB87", "RE80", "RE89"];   // all regional lines München Hbf -> Augsburg
 const DELAY_WARN = 5;
 const OUT_WINDOW = [80, 40];       // way there: "your train" leaves 80-40 min before the first lecture
-const HOME_BUFFER = 20;            // way home: earliest train 20 min after the last lecture ends ...
+const HOME_BUFFER = 0;             // way home: earliest train right when the last lecture ends ...
 const HOME_WINDOW = 40;            // ... and the normal choice is within the 40 min after that
 const DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
 const SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
@@ -255,7 +255,7 @@ function trainWindow(now) {
   }
   if (!lec || !lec.end) return { k: "Heute", big: "Ende der Vorlesung eintragen", st: "Über ⚙︎, dann zeige ich deinen Zug nach Hause" };
   const ready = new Date(at(now, lec.end).getTime() + HOME_BUFFER * 60000);
-  return { k: "Vorlesung endet " + lec.end + " · Zug ab " + hm(ready), from: ready,
+  return { k: "Vorlesung endet " + lec.end + (HOME_BUFFER ? " · Zug ab " + hm(ready) : ""), from: ready,
            to: new Date(ready.getTime() + HOME_WINDOW * 60000), lateText: "Achtung: später zuhause" };
 }
 
