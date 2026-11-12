@@ -3,6 +3,7 @@
 // the permission header. It only forwards a few fixed kinds of requests:
 //   ?stop=<id>[&date=YYYYMMDD&time=HHMM]   departures at München Hbf (trains or U-Bahn) or Haunstetterstraße
 //   ?trip=home[&date=YYYYMMDD&time=HHMM]   journeys Augsburg Haunstetterstraße -> München Hbf (slimmed down)
+//   ?trip=u2[&date=YYYYMMDD&time=HHMM]     journeys Theresienstraße -> Feldmoching (Liam's Heimweg app, U2 travel times)
 //
 // Deploy: Cloudflare dashboard -> Workers & Pages -> zug-relay -> Edit code -> paste this -> Deploy.
 
@@ -11,8 +12,13 @@ const STOPS = new Set([
   "de:09162:100",   // München Hbf (trains)
   "de:09162:6",     // München Hauptbahnhof (U-Bahn, tram) - for the U2 home
   "de:09761:111",   // Augsburg Bahnhof Haunstetterstraße
+  "de:09162:120",   // München Theresienstraße (U2) - Liam's Heimweg
+  "de:09162:320",   // München Feldmoching (S1, U2, bus) - Liam's Heimweg
 ]);
-const TRIPS = { home: { from: "de:09761:111", to: "de:09162:100" } };
+const TRIPS = {
+  home: { from: "de:09761:111", to: "de:09162:100", n: "6" },
+  u2:   { from: "de:09162:120", to: "de:09162:320", n: "8" },
+};
 const ALLOWED_ORIGINS = ["https://liamglt.github.io"];
 
 // keep only what the app needs from a journey (the full answer is ~140 KB)
@@ -58,7 +64,7 @@ export default {
 
     if (trip) {
       const q = new URLSearchParams({ outputFormat: "rapidJSON", type_origin: "any", name_origin: trip.from,
-        type_destination: "any", name_destination: trip.to, useRealtime: "1", calcNumberOfTrips: "6",
+        type_destination: "any", name_destination: trip.to, useRealtime: "1", calcNumberOfTrips: trip.n,
         itdTripDateTimeDepArr: "dep", ...when });
       const r = await fetch(`${EFA}/XML_TRIP_REQUEST2?${q}`, opts);
       if (!r.ok) return reply(JSON.stringify({ error: r.status }), r.status);
