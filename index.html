@@ -77,6 +77,8 @@
     background: var(--card); box-shadow: 0 0 0 1px var(--line) inset; margin-bottom: 12px; }
   .tabs button { box-shadow: none; background: transparent; border-radius: 10px; padding: 9px 0; font-weight: 600; color: var(--muted); }
   .tabs button[aria-selected="true"] { background: var(--accent); color: #fff; }
+  #dayTabs { margin-bottom: 8px; }
+  #dayTabs button { padding: 6px 0; font-size: 14px; }
   @media (prefers-color-scheme: dark) { .tabs button[aria-selected="true"] { color: #0b1120; } }
   .day { display: grid; grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 6px; margin: 8px 0; font-size: 15px; }
   .day span:first-child { overflow: hidden; text-overflow: ellipsis; }
@@ -101,7 +103,11 @@
     </div>
   </header>
 
-  <div class="tabs" role="tablist">
+  <div class="tabs" id="dayTabs" role="tablist" aria-label="Tag">
+    <button role="tab" data-day="0" aria-selected="true">Heute</button>
+    <button role="tab" data-day="1" aria-selected="false">Morgen</button>
+  </div>
+  <div class="tabs" id="dirTabs" role="tablist" aria-label="Richtung">
     <button role="tab" data-dir="out" aria-selected="true">Hinfahrt</button>
     <button role="tab" data-dir="home" aria-selected="false">Rückfahrt</button>
   </div>
@@ -159,7 +165,8 @@ function loadLectures() {
   return v;
 }
 function saveLectures(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} }
-const today = () => loadLectures()[new Date().getDay() - 1] || null;   // getDay: 0=Sun, 1=Mon
+const lectureOn = (d) => loadLectures()[d.getDay() - 1] || null;   // getDay: 0=Sun, 1=Mon
+const today = () => lectureOn(new Date());
 
 // ---- data: MVV timetable server (EFA, behind the MVV app), includes DB regional trains ----
 const REGIONAL = 13;   // EFA product class for regional trains (RE/RB)
@@ -209,6 +216,8 @@ const where = (d) => d.line + " · " + hm(d.planned) + (d.platform ? " · Gleis 
 const cap = (t) => t[0].toUpperCase() + t.slice(1);
 
 function evaluate(deps, from, to, now, lateText, horizon) {
+  if (to < now)   // today's window is over
+    return { mine: null, cls: "none", big: "Für heute vorbei", st: "Für den nächsten Tag: oben auf „Morgen“ tippen" };
   if (horizon && to > horizon && !deps.some((d) => d.planned >= from && d.planned <= to))
     return { mine: null, cls: "none", big: "Zug " + hm(from) + "–" + hm(to), st: "Noch keine Daten so weit im Voraus – später nochmal schauen" };
   const inWin = deps.filter((d) => d.planned >= from && d.planned <= to);
@@ -233,29 +242,32 @@ function evaluate(deps, from, to, now, lateText, horizon) {
 }
 
 // ---- rendering ----
-let dir = null, userPicked = false;
+let dir = null, userPicked = false, dayOffset = 0;   // dayOffset: 0 = today, 1 = tomorrow
+const baseDay = (now) => { const d = new Date(now); d.setDate(d.getDate() + dayOffset); return d; };
 function autoDir() {
+  if (dayOffset) return "out";   // tomorrow: start with the way there
   const lec = today();
   return lec && lec.start && new Date() >= at(new Date(), lec.start) ? "home" : "out";
 }
 function setDir(d) {
   dir = d; $("title").textContent = DIRS[d].title;
-  document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.dir === d)));
+  document.querySelectorAll("#dirTabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.dir === d)));
 }
 
 // today's train window for the current tab: { from, to, k, lateText } or { k, big, st } if there is none
 function trainWindow(now) {
-  const lec = today();
+  const day = baseDay(now), lec = lectureOn(day), when = dayOffset ? "morgen" : "heute";
   if (dir === "out") {
-    if (!lec || !lec.start) return { k: "Heute", big: "Keine Vorlesung eingetragen", st: "Über ⚙︎ Vorlesungszeiten eintragen" };
-    const lecture = at(now, lec.start), k = "Vorlesung heute " + lec.start;
+    if (!lec || !lec.start) return { k: cap(when), big: "Keine Vorlesung eingetragen", st: "Über ⚙︎ Vorlesungszeiten eintragen" };
+    const lecture = at(day, lec.start), k = "Vorlesung " + when + " " + lec.start;
     if (lecture < now) return { k, big: "Vorlesung hat begonnen", st: "Für den Heimweg: Rückfahrt" };
     return { k, from: new Date(lecture - OUT_WINDOW[0] * 60000), to: new Date(lecture - OUT_WINDOW[1] * 60000),
              lateText: "Achtung: kommt später an" };
   }
-  if (!lec || !lec.end) return { k: "Heute", big: "Ende der Vorlesung eintragen", st: "Über ⚙︎, dann zeige ich deinen Zug nach Hause" };
-  const ready = new Date(at(now, lec.end).getTime() + HOME_BUFFER * 60000);
-  return { k: "Vorlesung endet " + lec.end + (HOME_BUFFER ? " · Zug ab " + hm(ready) : ""), from: ready,
+  if (!lec || !lec.end) return { k: cap(when), big: lec ? "Ende der Vorlesung eintragen" : "Keine Vorlesung eingetragen",
+                                  st: "Über ⚙︎, dann zeige ich deinen Zug nach Hause" };
+  const ready = new Date(at(day, lec.end).getTime() + HOME_BUFFER * 60000);
+  return { k: "Vorlesung endet " + (dayOffset ? "morgen " : "") + lec.end + (HOME_BUFFER ? " · Zug ab " + hm(ready) : ""), from: ready,
            to: new Date(ready.getTime() + HOME_WINDOW * 60000), lateText: "Achtung: später zuhause" };
 }
 
@@ -282,7 +294,8 @@ function render(result) {
   $("list").innerHTML = !list.length
     ? `<div class="empty">${dir === "out" ? "Keine Züge nach Augsburg" : "Keine Regionalzüge nach München"} in den nächsten Stunden.</div>`
     : list.map(row).join("") + (later ? '<div class="gap">· · ·</div>' + row(r.mine) : "");
-  $("updated").textContent = "Stand " + hm(now) + " · aktualisiert jede Minute";
+  $("updated").textContent = dayOffset ? "Fahrplan für morgen · Verspätungen erst kurz vorher"
+                                       : "Stand " + hm(now) + " · aktualisiert jede Minute";
   $("source").textContent = "Daten: MVV";
 }
 
@@ -292,8 +305,9 @@ async function refresh() {
   if (!userPicked) setDir(autoDir());
   $("refresh").textContent = "…";
   try {
-    const res = await loadDepartures(dir);
     const w = trainWindow(new Date());
+    const tomorrowStart = dayOffset ? (w.from ? new Date(w.from.getTime() - 15 * 60000) : at(baseDay(new Date()), "07:00")) : null;
+    const res = await loadDepartures(dir, tomorrowStart);
     if (w.from && w.to > res.horizon) {   // her window is further ahead than the first batch reaches
       try {
         const more = await loadDepartures(dir, new Date(w.from.getTime() - 15 * 60000));
@@ -327,8 +341,13 @@ $("dlg").addEventListener("close", () => {
   DAYS.forEach((_, i) => { const s = f["s" + i].value, e = f["e" + i].value; if (s || e) v[i] = { start: s, end: e }; });
   saveLectures(v); userPicked = false; refresh();
 });
-document.querySelectorAll(".tabs button").forEach((b) =>
+document.querySelectorAll("#dirTabs button").forEach((b) =>
   b.addEventListener("click", () => { userPicked = true; setDir(b.dataset.dir); refresh(); }));
+document.querySelectorAll("#dayTabs button").forEach((b) => b.addEventListener("click", () => {
+  dayOffset = Number(b.dataset.day); userPicked = false;
+  document.querySelectorAll("#dayTabs button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+  refresh();
+}));
 $("settings").addEventListener("click", openSettings);
 $("refresh").addEventListener("click", refresh);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
