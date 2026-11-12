@@ -65,6 +65,14 @@
   .b-warn { color: var(--warn); background: var(--warn-bg); }
   .b-bad { color: var(--bad); background: var(--bad-bg); }
   .empty, .err { padding: 18px 16px; color: var(--muted); }
+  .onward .k { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .onward .trip { padding: 8px 0; border-top: 1px solid var(--line); }
+  .onward .trip:first-of-type { border-top: 0; }
+  .onward .leg { font-size: 15px; }
+  .onward .u2 { margin-top: 4px; font-size: 15px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .onward .tag { font-size: 12px; color: var(--muted); }
+  .onward .late { color: var(--warn); font-weight: 600; }
+  .chip.u { background: #0065ae; }
   .gap { text-align: center; color: var(--muted); padding: 4px 0; border-top: 1px solid var(--line); letter-spacing: 4px; }
   .err { color: var(--bad); }
   .foot { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
@@ -118,6 +126,8 @@
     <div class="state" id="hero-state"></div>
   </div>
 
+  <div class="card onward" id="onward" hidden></div>
+
   <div class="card list" id="list"><div class="empty">Lädt Abfahrten …</div></div>
   <div class="foot" id="source"></div>
 </div>
@@ -139,7 +149,9 @@ const LINES = ["RE9", "RE86", "RE87", "RB86", "RB87", "RE80", "RE89"];   // all 
 const DELAY_WARN = 5;
 const OUT_WINDOW = [80, 40];       // way there: "your train" leaves 80-40 min before the first lecture
 const HOME_BUFFER = 0;             // way home: earliest train right when the last lecture ends ...
-const HOME_WINDOW = 40;            // ... and the normal choice is within the 40 min after that
+const HOME_WINDOW = 40;
+const U2_CHANGE_MIN = 5;           // walk from her train to the U2 at Hauptbahnhof
+const U2_STOP = "de:09162:6", U2_TOWARDS = /feldmoching/i;            // ... and the normal choice is within the 40 min after that
 const DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
 const SHORT = ["Mo", "Di", "Mi", "Do", "Fr"];
 const KEY = "train-board-lectures";
@@ -294,9 +306,64 @@ function render(result) {
   $("list").innerHTML = !list.length
     ? `<div class="empty">${dir === "out" ? "Keine Züge nach Augsburg" : "Keine Regionalzüge nach München"} in den nächsten Stunden.</div>`
     : list.map(row).join("") + (later ? '<div class="gap">· · ·</div>' + row(r.mine) : "");
+  render.last = { mine: r.mine, upcoming };
   $("updated").textContent = dayOffset ? "Fahrplan für morgen · Verspätungen erst kurz vorher"
                                        : "Stand " + hm(now) + " · aktualisiert jede Minute";
   $("source").textContent = "Daten: MVV";
+}
+
+// ---- way home: arrival at München Hbf + U2 to Feldmoching ----
+async function relayJSON(query, at) {
+  let url = RELAY.replace(/\/$/, "") + "/?" + query;
+  if (at) { const b = berlinStamp(at); url += "&date=" + b.date + "&time=" + b.time; }
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error("MVV " + r.status);
+  return r.json();
+}
+// arrival at Hbf for a train, from the journey planner (direct journeys only)
+function arrivalFor(train, journeys) {
+  for (const j of journeys) {
+    if (j.legs.length !== 1) continue;
+    const l = j.legs[0];
+    if (Math.abs(new Date(l.departurePlanned) - train.planned) > 60000) continue;
+    const planned = new Date(l.arrivalPlanned), est = l.arrivalEstimated ? new Date(l.arrivalEstimated) : planned;
+    return { planned, est, delay: Math.max(0, Math.round((est - planned) / 60000)), platform: l.arrivalPlatform, cancelled: l.cancelled };
+  }
+  return null;
+}
+async function u2After(t) {
+  const data = await relayJSON("stop=" + encodeURIComponent(U2_STOP), new Date(t.getTime() - 60000));
+  return (data.stopEvents || []).map((e) => {
+    const tr = e.transportation || {}, planned = new Date(e.departureTimePlanned);
+    const est = e.departureTimeEstimated ? new Date(e.departureTimeEstimated) : planned;
+    return { line: norm(tr.number), dest: (tr.destination && tr.destination.name) || "", planned, est,
+             delay: Math.max(0, Math.round((est - planned) / 60000)), cancelled: !!e.isCancelled };
+  }).filter((u) => u.line === "U2" && U2_TOWARDS.test(u.dest) && !u.cancelled && u.est >= t)
+    .sort((a, b) => a.est - b.est).slice(0, 2);
+}
+async function renderOnward() {
+  const box = $("onward"), last = render.last;
+  if (dir !== "home" || !last || !last.mine) { box.hidden = true; return; }
+  const trains = [last.mine, last.upcoming.find((d) => d.planned > last.mine.planned && !d.cancelled)].filter(Boolean);
+  let html = '<div class="k">Weiter nach Hause · U2 → Feldmoching</div>';
+  try {
+    const trips = await relayJSON("trip=home", new Date(trains[0].planned.getTime() - 60000));
+    for (const [i, t] of trains.entries()) {
+      const a = arrivalFor(t, trips.journeys || []);
+      html += '<div class="trip"><div class="tag">' + (i ? "Nächster Zug" : "Dein Zug") + '</div><div class="leg"><span class="chip">'
+            + t.line + "</span><b>" + hm(t.planned) + "</b> → Hbf ";
+      if (!a) { html += "Ankunft unbekannt</div></div>"; continue; }
+      html += "an <b>" + hm(a.est) + "</b>" + (a.delay ? ' <span class="late">+' + a.delay + "</span>" : "")
+            + (a.platform ? " · Gl. " + escapeHtml(a.platform) : "") + "</div>";
+      const u = await u2After(new Date(a.est.getTime() + U2_CHANGE_MIN * 60000));
+      html += '<div class="u2"><span class="chip u">U2</span><span class="tag">ab ' + hm(new Date(a.est.getTime() + U2_CHANGE_MIN * 60000)) + ":</span> " + (u.length
+        ? u.map((x) => "<b>" + hm(x.est) + "</b>" + (x.delay ? ' <span class="late">+' + x.delay + "</span>" : "")).join(" · ")
+        : "keine Abfahrt gefunden") + "</div></div>";
+    }
+  } catch (e) {
+    html += '<div class="trip"><div class="leg tag">Anschluss gerade nicht abrufbar</div></div>';
+  }
+  box.innerHTML = html; box.hidden = false;
 }
 
 let busy = false;
@@ -317,10 +384,11 @@ async function refresh() {
       } catch (e) { /* keep the first batch; the top card then says it's too early */ }
     }
     render(res);
+    await renderOnward();
   }
   catch (e) {
     $("list").innerHTML = '<div class="err">Abfahrten konnten nicht geladen werden.<br><small>' + escapeHtml(e.message) + "</small></div>";
-    $("updated").textContent = "Fehler beim Laden";
+    $("updated").textContent = "Fehler beim Laden"; $("onward").hidden = true;
     $("hero").className = "card hero bad"; $("hero-k").textContent = "Keine Live-Daten";
     $("hero-big").textContent = "Bitte DB Navigator nutzen"; $("hero-state").textContent = "Gleich nochmal mit ↻ versuchen";
   } finally { busy = false; $("refresh").textContent = "↻"; }

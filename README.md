@@ -5,6 +5,7 @@ A small home-screen web app with live train departures for the commute between M
 - **Hinfahrt:** regional trains to Augsburg from **München Hbf** (RE9, RE/RB 86, RE/RB 87, RE80, RE89). The top card shows today's train based on your first lecture (trains leaving 80–40 min before).
 - **Rückfahrt:** every regional train from **Augsburg Bahnhof Haunstetterstraße** towards München. The top card shows the first train leaving after your last lecture ends.
 - The app switches to Rückfahrt automatically once your first lecture has started; you can also switch by hand.
+- **Weiter nach Hause:** on the Rückfahrt tab, for "dein Zug" and the next train: live arrival at München Hbf (journey planner) and the next two U2 towards Feldmoching from Hauptbahnhof, allowing 5 min to change.
 - **Heute / Morgen:** "Morgen" shows tomorrow's trains for your lecture times (timetable plus cancellations already known; live delays only appear shortly before departure).
 - If your train is delayed or cancelled, the top card tells you which one to take instead.
 - Lecture start and end times are entered via ⚙︎ and stored **only on your phone** (browser storage). Nothing personal is in this repo.
@@ -21,7 +22,7 @@ GitHub Pages: Settings → Pages → Source "Deploy from a branch" → `main` / 
 
 ## Relay (needed for live data)
 
-The MVV server doesn't let websites load its data directly (CORS), so the app goes through a small Cloudflare Worker: `relay/worker.js`. It only forwards departure requests for München Hbf and Augsburg Bahnhof Haunstetterstraße, and only for this site.
+The MVV server doesn't let websites load its data directly (CORS), so the app goes through a small Cloudflare Worker: `relay/worker.js`. It only forwards a few fixed requests (departures at München Hbf, the U-Bahn at Hauptbahnhof and Augsburg Bahnhof Haunstetterstraße, plus the journey Haunstetterstraße → München Hbf), and only for this site.
 
 1. Cloudflare dashboard → **Workers & Pages** → **Create** → **Create Worker** → name it e.g. `zug-relay` → **Deploy**.
 2. **Edit code** → replace everything with `relay/worker.js` → **Deploy**.
