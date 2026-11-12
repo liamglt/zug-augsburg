@@ -342,11 +342,26 @@ async function u2After(t) {
   }).filter((u) => u.line === "U2" && U2_TOWARDS.test(u.dest) && !u.cancelled && u.est >= t)
     .sort((a, b) => a.est - b.est).slice(0, 2);
 }
+// RE2 (Regensburg) and RB33 (Landshut) from Hbf also stop in Feldmoching: list them only if she can still
+// make them with her train's live arrival, and only if they leave soon enough to be worth it
+const REGIO_LINES = ["RE2", "RB33"], REGIO_CHANGE_MIN = 5, REGIO_MAX_WAIT = 30;
+async function regioAfter(arrival) {
+  const from = new Date(arrival.getTime() + REGIO_CHANGE_MIN * 60000), until = new Date(arrival.getTime() + REGIO_MAX_WAIT * 60000);
+  const data = await relayJSON("stop=" + encodeURIComponent(DIRS.out.stop), new Date(from.getTime() - 60000));
+  const deps = (data.stopEvents || []).map((e) => {
+    const tr = e.transportation || {}, props = (e.location && e.location.properties) || {}, planned = new Date(e.departureTimePlanned);
+    const est = e.departureTimeEstimated ? new Date(e.departureTimeEstimated) : planned;
+    return { line: norm(tr.number || tr.disassembledName), planned, est, delay: Math.max(0, Math.round((est - planned) / 60000)),
+             cancelled: !!e.isCancelled, platform: props.platformName || props.platform || "" };
+  }).filter((d) => REGIO_LINES.includes(d.line) && !d.cancelled && d.est >= from && d.est <= until)
+    .sort((a, b) => a.est - b.est);
+  return REGIO_LINES.map((l) => deps.find((d) => d.line === l)).filter(Boolean).sort((a, b) => a.est - b.est);
+}
 async function renderOnward() {
   const box = $("onward"), last = render.last;
   if (dir !== "home" || !last || !last.mine) { box.hidden = true; return; }
   const trains = [last.mine, last.upcoming.find((d) => d.planned > last.mine.planned && !d.cancelled)].filter(Boolean);
-  let html = '<div class="k">Weiter nach Hause · U2 → Feldmoching</div>';
+  let html = '<div class="k">Weiter nach Hause · → Feldmoching</div>';
   try {
     const trips = await relayJSON("trip=home", new Date(trains[0].planned.getTime() - 60000));
     for (const [i, t] of trains.entries()) {
@@ -359,7 +374,11 @@ async function renderOnward() {
       const u = await u2After(new Date(a.est.getTime() + U2_CHANGE_MIN * 60000));
       html += '<div class="u2"><span class="chip u">U2</span><span class="tag">ab ' + hm(new Date(a.est.getTime() + U2_CHANGE_MIN * 60000)) + ":</span> " + (u.length
         ? u.map((x) => "<b>" + hm(x.est) + "</b>" + (x.delay ? ' <span class="late">+' + x.delay + "</span>" : "")).join(" · ")
-        : "keine Abfahrt gefunden") + "</div></div>";
+        : "keine Abfahrt gefunden") + "</div>";
+      const r = await regioAfter(a.est).catch(() => []);
+      html += r.map((x) => '<div class="u2"><span class="chip">' + x.line + '</span><b>' + hm(x.est) + "</b>"
+        + (x.delay ? ' <span class="late">+' + x.delay + "</span>" : "") + (x.platform ? ' <span class="tag">Gl. ' + escapeHtml(x.platform) + "</span>" : "")
+        + "</div>").join("") + "</div>";
     }
   } catch (e) {
     html += '<div class="trip"><div class="leg tag">Anschluss gerade nicht abrufbar</div></div>';
